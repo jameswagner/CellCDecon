@@ -28,7 +28,7 @@ d) columns is an integer >= 1 specifying how many columns at the beginning of ea
 defaults to 1 if not specified
 e) maxProbes is an integer >= 1 specifying how many probes (i.e. rows excluding the header row) are to be read in. The program will stop reading in input either when maxProbes rows have been read, 
 or it reaches the end of the input file, whichever comes first. Default: 500,000
-f) seed is an integer (non-negative)? that is used in srand as at various points the algorithm generates random numbers which may lead to  different outputs with different seeds. Default: 41
+f) seed is an integer (non-negative)? that is used in srand as at various points the algorithm generates random numbers which may lead to  different outputs with different seeds. Default: current time 
 
 Arguments can be specified in any order, however a space must separate the parameter name and the parameter value (for example "-k 3" and NOT "-k3").
 
