@@ -12,7 +12,7 @@ void fillLog(float *logTable, int size) {
   }
 }
 
-inline float logLikelihoodPerSampleProbe(float **obs_mat,  int k, float **infer_weight, float **mean_mat, float **var_mat, int sample_index, int probe_index, float *logTable) {
+inline float logLikelihoodPerSampleProbe(float **obs_mat,  int k, float **infer_weight, float **mean_mat, float **var_mat, int sample_index, int probe_index, float *logTable, float gamma) {
   /* This is the "workhorse" function of the current implementation. Given a probe and sample, what is the loglikehood of a  the observed methylation value ?
      input arguments:
      obs_mat: a matrix of observed values with the samples corresponding to rows and the probes corresponding to columns
@@ -37,25 +37,32 @@ inline float logLikelihoodPerSampleProbe(float **obs_mat,  int k, float **infer_
   if(obs_mat[sample_index][probe_index] == -1 ) { //missing value
     return 0 ;
   }
+  float regularized = 0.;
+  
   for (int a=0;a<k;a++) {
     sumMean+=sample_weight[a]*mean_mat[a][probe_index];
     sumVar+=sample_weight[a]*sample_weight[a]*var_mat[a][probe_index];
-
+    regularized += fabs(0.5-mean_mat[a][probe_index]);
   }
+
+  regularized *= gamma;
+
+
+
   float t=obs_mat[sample_index][probe_index]-sumMean;
   //printf("came up with summean %f sumvar %f observed is %f t is %f\n", sumMean, sumVar, obs_mat[sample_index][probe_index], t);
   if(sumVar*100000 > 10000000) {
     return -t*t/sumVar/2- 0.5*log(6.283185*(sumVar*100000+1)/100000.0); // exceeds bounds of log table
   }
 
-  return   (-t*t/sumVar/2-logTable[(int)(sumVar*100000)]); // lookup in logtable
+  return   (-t*t/sumVar/2-logTable[(int)(sumVar*100000)] + regularized); // lookup in logtable
   
 }
 
 
 
 
-float logLikelihoodPerSample(float **obs_meth_mat, int nprobe, int k, float **infer_weight,  float **mean_mat, float **var_mat, int sample_index, float *logTable) {
+float logLikelihoodPerSample(float **obs_meth_mat, int nprobe, int k, float **infer_weight,  float **mean_mat, float **var_mat, int sample_index, float *logTable, float gamma) {
   /*
     Takes log likelihood for given sample, given the observations and the current weights and means 
  input arguments:
@@ -75,12 +82,12 @@ float logLikelihoodPerSample(float **obs_meth_mat, int nprobe, int k, float **in
    */
   float logLike=0;
   for (int probe_index = 0; probe_index<nprobe; probe_index++) {
-    logLike+=logLikelihoodPerSampleProbe(obs_meth_mat,  k, infer_weight, mean_mat, var_mat, sample_index, probe_index, logTable);
+    logLike+=logLikelihoodPerSampleProbe(obs_meth_mat,  k, infer_weight, mean_mat, var_mat, sample_index, probe_index, logTable, gamma);
   }
   return logLike;
 }
 
-float logLikelihoodPerProbe(float **obs_meth_mat,   int nsamp, int k, float **infer_weight, float **mean_mat, float **var_mat, int probe_index, float *logTable) {
+float logLikelihoodPerProbe(float **obs_meth_mat,   int nsamp, int k, float **infer_weight, float **mean_mat, float **var_mat, int probe_index, float *logTable, float gamma) {
   /*
     Takes log likelihood for given sample, given the observations and the current weights and means
  input arguments:
@@ -103,14 +110,14 @@ float logLikelihoodPerProbe(float **obs_meth_mat,   int nsamp, int k, float **in
 
  float logLike=0;
   for (int sample_index=0; sample_index<nsamp; sample_index++) {
-    logLike+=logLikelihoodPerSampleProbe(obs_meth_mat,  k, infer_weight,mean_mat, var_mat,sample_index, probe_index, logTable);
+    logLike+=logLikelihoodPerSampleProbe(obs_meth_mat,  k, infer_weight,mean_mat, var_mat,sample_index, probe_index, logTable, gamma);
   }
 
   return logLike;
 }
 
 
-float logLikelihood(float **obs_meth_mat, int nprobe, int nsamp, int k, float **infer_weight,    float **mean_mat, float **var_mat, float *logTable) {
+float logLikelihood(float **obs_meth_mat, int nprobe, int nsamp, int k, float **infer_weight,    float **mean_mat, float **var_mat, float *logTable, float gamma) {
 /*
     Takes log likelihood for given sample, given the observations and the current weights and means
  input arguments:
@@ -130,18 +137,18 @@ float logLikelihood(float **obs_meth_mat, int nprobe, int nsamp, int k, float **
   */
   float logLike=0;
   for (int j=0;j<nsamp;j++) {
-    logLike+=logLikelihoodPerSample(obs_meth_mat, nprobe, k, infer_weight, mean_mat, var_mat, j, logTable);
+    logLike+=logLikelihoodPerSample(obs_meth_mat, nprobe, k, infer_weight, mean_mat, var_mat, j, logTable, gamma);
   }
   return logLike;
 }
 
 
 
-void write_files(string filename, int k, int seed, float** infer_weight, int nsamp, int nprobe, string *probe_ids, float** obs_mat, float **infer_mean, float **infer_var, float *obs_mean, float *obs_var, string samplePrefix, string *sample_ids) {
+void write_files(string filename, int k, int seed, float** infer_weight, int nsamp, int nprobe, string *probe_ids, float** obs_mat, float **infer_mean, float **infer_var, float *obs_mean, float *obs_var, string samplePrefix, string *sample_ids, float gamma) {
 
   //File names and opening of three files
   stringstream sstm;
-  sstm << filename << ".k" << k  << ".seed" << seed << ".";
+  sstm << filename << ".k" << k  << ".seed" << seed << ".gamma" << gamma << ".";
   string file_base = sstm.str();
   string weight_file = file_base + "w";
   string mean_file = file_base + "meanvar";
@@ -233,7 +240,7 @@ void processFile(string filename, int nsamp, int colskip, string &samplePrefix, 
   /*Get column headers in first line of file that do not correspond to sample ids*/
   for(int i=0; i < colskip; i++) {
     fscanf(f,"%s", j);
-    samplePrefix = samplePrefix + j;
+    samplePrefix = samplePrefix + j + " ";
     //printf("prefix %s\n", samplePrefix.c_str());
   }
 
@@ -384,7 +391,7 @@ Note: infer_mean and infer_var matrices must have memory allocated before callin
   
 
    
-void update_weights(float **infer_weight, float* min_weights, float* max_weights, float **obs_mat, float **infer_mean, float **infer_var, int *iters_unconsidered_ind, int* iters_unchanged_ind, int max_unchanged_ind, int max_unconsidered_ind, int k, int nsamp, int nprobe, float *logTable ) {
+void update_weights(float **infer_weight, float* min_weights, float* max_weights, float **obs_mat, float **infer_mean, float **infer_var, int *iters_unconsidered_ind, int* iters_unchanged_ind, int max_unchanged_ind, int max_unconsidered_ind, int k, int nsamp, int nprobe, float *logTable, float gamma ) {
   /*This is one step in our iterative cell type deconvolution procedure. For each sample, the current log likelihood will be calculated, weights randomly perturbed and for
 each perturbation the change accepted if it increases the sample log likelihood
 
@@ -423,7 +430,7 @@ nprobe - number of probes
       }
 
       
-      float sampleLogLike = logLikelihoodPerSample(obs_mat, nprobe, k, infer_weight, infer_mean, infer_var, s, logTable);
+      float sampleLogLike = logLikelihoodPerSample(obs_mat, nprobe, k, infer_weight, infer_mean, infer_var, s, logTable, gamma);
       for (int runnum=0;runnum<k*3;runnum++) {
 	
 
@@ -461,7 +468,7 @@ nprobe - number of probes
       
 	//float logLikelihoodPerSample(float **obs_meth_mat, int nprobe, int k, float **infer_weight,  float **mean_mat, float **var_mat, int sample_index) {
 
-	float newSampleLogLike=logLikelihoodPerSample(obs_mat, nprobe, k, infer_weight, infer_mean, infer_var, s, logTable);
+	float newSampleLogLike=logLikelihoodPerSample(obs_mat, nprobe, k, infer_weight, infer_mean, infer_var, s, logTable, gamma);
       
 	if (newSampleLogLike>sampleLogLike) {
 	  //printf("changed !\n");
@@ -482,7 +489,7 @@ nprobe - number of probes
   }
 }
 
-void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int nprobe, int k, int *iters_unchanged, int *iters_unconsidered, int max_unchanged, int max_unconsidered, float *max_means, float *min_means, float **infer_weight, float *obs_min, float *obs_max, int nsamp, float *logTable) {
+void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int nprobe, int k, int *iters_unchanged, int *iters_unconsidered, int max_unchanged, int max_unconsidered, float *max_means, float *min_means, float **infer_weight, float *obs_min, float *obs_max, int nsamp, float *logTable, float gamma) {
   /*This is the other step in the iterative process. In this case for each probe a randomly selected one of the k cell types is selected and its mean and variance perturbed
     the change is accepted if this led to an improvement */
 
@@ -500,7 +507,7 @@ void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int
 	continue;
       }
     }
-    float probeLogLike = logLikelihoodPerProbe(obs_mat, nsamp, k, infer_weight, infer_mean, infer_var,i, logTable);
+    float probeLogLike = logLikelihoodPerProbe(obs_mat, nsamp, k, infer_weight, infer_mean, infer_var,i, logTable, gamma);
     for (int celltype_iter=0;celltype_iter<k*3;celltype_iter++) {
       // pick a class randomly
       int randomk=rand()%k;
@@ -517,7 +524,7 @@ void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int
       if (infer_mean[randomk][i]>max_means[i]) {infer_mean[randomk][i]=max_means[i]; }
       if (infer_mean[randomk][i]<min_means[i]) {infer_mean[randomk][i]=min_means[i];        }
       
-      float newProbeLogLike=logLikelihoodPerProbe(obs_mat, nsamp, k, infer_weight, infer_mean, infer_var,i, logTable);
+      float newProbeLogLike=logLikelihoodPerProbe(obs_mat, nsamp, k, infer_weight, infer_mean, infer_var,i, logTable, gamma);
       if (newProbeLogLike>probeLogLike) {
 
 	probeLogLike=newProbeLogLike;

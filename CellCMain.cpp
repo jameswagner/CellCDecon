@@ -3,7 +3,7 @@
 #include <time.h>
 
 
-int parseArgs(int argc, char* argv[], string &filename, int &k, int &seed, int &maxProbes, int &nsamp, int &colskip) {
+int parseArgs(int argc, char* argv[], string &filename, int &k, int &seed, int &maxProbes, int &nsamp, int &colskip, float &gamma) {
   for(int i = 1; i < argc; i+=2) {
     if(!strcmp(argv[i], "-f")) {
       filename = string(argv[i+1]);
@@ -22,6 +22,9 @@ int parseArgs(int argc, char* argv[], string &filename, int &k, int &seed, int &
     }
     else if(!strcmp(argv[i], "-c")) {
       colskip = atoi(argv[i+1]);
+    }
+    else if (!strcmp(argv[i], "-g")) {
+      gamma = atof(argv[i+1]);
     }
 
   }
@@ -43,7 +46,8 @@ int main(int argc, char *argv[]) {
   int maxProbes = 5e5;
   int nsamp = 0;
   int colskip = 1;
-  if(parseArgs(argc, argv, filename, k, seed, maxProbes, nsamp, colskip) < 1) {
+  float gamma = 0;
+  if(parseArgs(argc, argv, filename, k, seed, maxProbes, nsamp, colskip, gamma) < 1) {
     fprintf(stderr, "Requires arguments -k <number of cell types> -n <number of samples> -f <input filename>\n");
     exit(1);
   }
@@ -98,7 +102,7 @@ int main(int argc, char *argv[]) {
   float *min_weights = new float[nsamp]();
   float *max_weights = new float[nsamp]();
 
-
+  
 
 
   for (int i=0;i<nsamp;i++) {
@@ -128,11 +132,11 @@ int main(int argc, char *argv[]) {
     for (int iter=0;iter<1000;iter++) {
            printf("iter %d\n", iter);
 
-	   update_weights(infer_weight, min_weights,  max_weights, obs_mat, infer_mean, infer_var, iters_unconsidered_ind,  iters_unchanged_ind,  max_unchanged_ind,  max_unconsidered_ind,  k,  nsamp,  nprobe, logTable ) ;
-	   update_meanvar(obs_mat, infer_mean, infer_var,  nprobe,  k, iters_unchanged,  iters_unconsidered, max_unchanged,  max_unconsidered,  max_means, min_means, infer_weight, obs_min, obs_max, nsamp, logTable) ;
+	   update_weights(infer_weight, min_weights,  max_weights, obs_mat, infer_mean, infer_var, iters_unconsidered_ind,  iters_unchanged_ind,  max_unchanged_ind,  max_unconsidered_ind,  k,  nsamp,  nprobe, logTable, gamma ) ;
+	   update_meanvar(obs_mat, infer_mean, infer_var,  nprobe,  k, iters_unchanged,  iters_unconsidered, max_unchanged,  max_unconsidered,  max_means, min_means, infer_weight, obs_min, obs_max, nsamp, logTable, gamma) ;
       
     }
-    write_files( filename,  k, seed,  infer_weight,  nsamp, nprobe, probe_ids,  obs_mat, infer_mean, infer_var, obs_mean, obs_var,  sample_prefix, sample_ids) ;
+    write_files( filename,  k, seed,  infer_weight,  nsamp, nprobe, probe_ids,  obs_mat, infer_mean, infer_var, obs_mean, obs_var,  sample_prefix, sample_ids, gamma) ;
     
     
   
