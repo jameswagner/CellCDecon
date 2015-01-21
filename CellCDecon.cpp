@@ -48,15 +48,7 @@ inline float logLikelihoodPerSampleProbe(float **obs_mat,  int k, float **infer_
   regularized *= gamma;
 
 
-
-  float t=obs_mat[sample_index][probe_index]-sumMean;
-  //printf("came up with summean %f sumvar %f observed is %f t is %f\n", sumMean, sumVar, obs_mat[sample_index][probe_index], t);
-  if(sumVar*100000 > 10000000) {
-    return -t*t/sumVar/2- 0.5*log(6.283185*(sumVar*100000+1)/100000.0); // exceeds bounds of log table
-  }
-
-  return   (-t*t/sumVar/2-logTable[(int)(sumVar*100000)] + regularized); // lookup in logtable
-  
+  return -1 *  (sumMean-obs_mat[sample_index][probe_index]) * (sumMean-obs_mat[sample_index][probe_index]) + regularized;
 }
 
 
@@ -148,7 +140,7 @@ void write_files(string filename, int k, int seed, float** infer_weight, int nsa
 
   //File names and opening of three files
   stringstream sstm;
-  sstm << filename << ".k" << k  << ".seed" << seed << ".gamma" << gamma << ".";
+  sstm << filename << ".k" << k  << ".seed" << seed << ".gamma" << gamma << ".SUMSQ.";
   string file_base = sstm.str();
   string weight_file = file_base + "w";
   string mean_file = file_base + "meanvar";
@@ -186,7 +178,7 @@ void write_files(string filename, int k, int seed, float** infer_weight, int nsa
   }
   fprintf(fr, "\n");
   for (int i=0;i<nprobe;i++) {
-    fprintf(fr, "%s ", probe_ids[i].c_str());
+    fprintf(fr, "%s", probe_ids[i].c_str());
     for (int ii=0;ii<nsamp;ii++) {
       float pred =0.;
       for (int a=0;a<k;a++) {
@@ -195,7 +187,7 @@ void write_files(string filename, int k, int seed, float** infer_weight, int nsa
 
       }
       
-      fprintf(fr, "%f ", obs_mat[ii][i]-pred);
+      fprintf(fr, " %f", obs_mat[ii][i]-pred);
     }
     fprintf(fr, "\n");
   }
@@ -268,6 +260,7 @@ void processFile(string filename, int nsamp, int colskip, string &samplePrefix, 
     for (int i = 1 ; i <  colskip; i++) {
 
       fscanf(f, "%s", j);
+      probe_id += " ";
       probe_id += j;
     }
 
@@ -309,7 +302,7 @@ void processFile(string filename, int nsamp, int colskip, string &samplePrefix, 
 
     obs_min[nprobe] = line_min;
     obs_max[nprobe] = line_max;
-    //    printf("observed mean var %f %f %f %f\n", obs_mean[nprobe], obs_var[nprobe], obs_min[nprobe], obs_max[nprobe]);
+    
     nprobe++;
     if (nprobe>=maxProbe) break;
   } // end of fscanf
@@ -410,6 +403,12 @@ k - number of cell types
 nsamp - number of samples
 nprobe - number of probes
    */
+
+  float old_logLike = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, 0);
+  float old_logLike_reg = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, gamma);
+  int rejected = 0;
+  int accepted = 0;
+
   float *old_weight = new float [k]();
   for (int s=0;s<nsamp;s++) {
       // pick a component at random and adjust its weight                                                 
@@ -443,15 +442,14 @@ nprobe - number of probes
 	float sumrest  = 1.0 - infer_weight[s][randomk];
 	// revise weights                                                                                   
 	infer_weight[s][randomk] *=  1+0.2*((float)rand()/RAND_MAX-0.5);
-	//	printf(" Revised %f %f from %f %f\n", infer_weight[s][0], infer_weight[s][1], old_weight[0], old_weight[1]);
-
-	if(infer_weight[s][randomk] / (infer_weight[s][randomk] + sumrest) < min_weights[s]) {
-	  infer_weight[s][randomk] = sumrest / (1/min_weights[s] - 1);
-	}
-	else if (infer_weight[s][randomk] / (infer_weight[s][randomk] + sumrest) > max_weights[s]) {
-	  infer_weight[s][randomk] = sumrest / (1/max_weights[s] - 1);
-	}
+	
         
+	if(infer_weight[s][randomk] > max_weights[s]) {
+	  infer_weight[s][randomk]  = max_weights[s];
+	}
+	else if (infer_weight[s][randomk] < min_weights[s]) {
+	  infer_weight[s][randomk] = min_weights[s];
+	}
 	float sw=0;
 	for (int a=0;a<k;a++) {
 	  sw+=infer_weight[s][a];
@@ -460,7 +458,7 @@ nprobe - number of probes
 	  infer_weight[s][a] /=sw;
 	}
 	
-	//	printf(" Revised %f %f from %f %f\n", infer_weight[s][0], infer_weight[s][1], old_weight[0], old_weight[1]);
+	
 
 	
       
@@ -472,6 +470,7 @@ nprobe - number of probes
       
 	if (newSampleLogLike>sampleLogLike) {
 	  //printf("changed !\n");
+	  accepted++;
 	  unchanged = 0;
 	  sampleLogLike=newSampleLogLike;
 	  for (int celltype_iter = 0; celltype_iter<k; celltype_iter++) { 
@@ -479,6 +478,7 @@ nprobe - number of probes
 	  }
 	}
 	else {
+	  rejected++;
 	  for(int celltype_iter = 0; celltype_iter < k; celltype_iter++) {
 	    infer_weight[s][celltype_iter] = old_weight[celltype_iter];
 	  }
@@ -487,13 +487,23 @@ nprobe - number of probes
       }
       iters_unchanged_ind[s] += unchanged;
   }
+
+
+
+  float new_logLike_reg = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, gamma);
+  float new_logLike = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, 0);
+  printf("update weight regularized logli before %f after %f\n", old_logLike_reg, new_logLike_reg);
+  printf("update weight pure logli before %f after %f\n", old_logLike, new_logLike);
+  printf("update weight accepted %d rejected %d\n", accepted, rejected);
+
 }
 
 void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int nprobe, int k, int *iters_unchanged, int *iters_unconsidered, int max_unchanged, int max_unconsidered, float *max_means, float *min_means, float **infer_weight, float *obs_min, float *obs_max, int nsamp, float *logTable, float gamma) {
   /*This is the other step in the iterative process. In this case for each probe a randomly selected one of the k cell types is selected and its mean and variance perturbed
     the change is accepted if this led to an improvement */
-
-
+  float old_logLike = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, 0);
+  float old_logLike_reg = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, gamma);
+  int accepted = 0; int rejected = 0;
 
   for (int i=0;i<nprobe;i++) {
     float diff = obs_max[i] - obs_min[i];
@@ -526,12 +536,12 @@ void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int
       
       float newProbeLogLike=logLikelihoodPerProbe(obs_mat, nsamp, k, infer_weight, infer_mean, infer_var,i, logTable, gamma);
       if (newProbeLogLike>probeLogLike) {
-
+	accepted++;
 	probeLogLike=newProbeLogLike;
 	  unchanged = 0;
       }
       else {
-
+	rejected++;
 	infer_mean[randomk][i]=oldinfer_mean;
 	infer_var[randomk][i]=oldinfer_var;
       }
@@ -540,6 +550,12 @@ void update_meanvar(float **obs_mat, float **infer_mean, float **infer_var,  int
     iters_unchanged[i] += unchanged;
   }
 
+
+  float new_logLike_reg = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, gamma);
+  float new_logLike = logLikelihood(obs_mat, nprobe, nsamp, k, infer_weight, infer_mean, infer_var, logTable, 0);
+  printf("update mean regularized logli before %f after %f\n", old_logLike_reg, new_logLike_reg);
+  printf("update mean pure logli before %f after %f\n", old_logLike, new_logLike);
+  printf("update mean accepted %d rejected %d\n", accepted, rejected);
 
 
   

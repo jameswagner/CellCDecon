@@ -126,17 +126,22 @@ int main(int argc, char *argv[]) {
 
   initialize_weight(infer_weight, k, nsamp, min_weights, max_weights);
   initialize_meanvar(infer_mean, infer_var, min_means, max_means,  obs_mean, obs_var, k, nprobe);
-
+  float original_gamma = gamma;
 
     
     for (int iter=0;iter<1000;iter++) {
            printf("iter %d\n", iter);
+	   if(iter==500) {
 
+             gamma=0;
+           }
 	   update_weights(infer_weight, min_weights,  max_weights, obs_mat, infer_mean, infer_var, iters_unconsidered_ind,  iters_unchanged_ind,  max_unchanged_ind,  max_unconsidered_ind,  k,  nsamp,  nprobe, logTable, gamma ) ;
 	   update_meanvar(obs_mat, infer_mean, infer_var,  nprobe,  k, iters_unchanged,  iters_unconsidered, max_unchanged,  max_unconsidered,  max_means, min_means, infer_weight, obs_min, obs_max, nsamp, logTable, gamma) ;
-      
+	   if(iter % 100 == 99) {
+	     write_files( filename,  k, seed,  infer_weight,  nsamp, nprobe, probe_ids,  obs_mat, infer_mean, infer_var, obs_mean, obs_var,  sample_prefix, sample_ids, original_gamma) ;
+	   }
     }
-    write_files( filename,  k, seed,  infer_weight,  nsamp, nprobe, probe_ids,  obs_mat, infer_mean, infer_var, obs_mean, obs_var,  sample_prefix, sample_ids, gamma) ;
+    write_files( filename,  k, seed,  infer_weight,  nsamp, nprobe, probe_ids,  obs_mat, infer_mean, infer_var, obs_mean, obs_var,  sample_prefix, sample_ids, original_gamma) ;
     
     
   
